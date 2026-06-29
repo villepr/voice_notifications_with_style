@@ -1,0 +1,20 @@
+{
+  "type": "turn.completed",
+  "title": "Feature implementation finished",
+  "message": "Implemented Spotify now-playing lookup, added fallback to Spotify window title, updated scripts/Invoke-VoiceNotification.ps1 and src/VoiceNotifier.psm1, and the smoke tests passed.",
+  "status": "completed",
+  "files": [
+    "scripts/Invoke-VoiceNotification.ps1",
+    "src/VoiceNotifier.psm1"
+  ],
+  "commands": [
+    "powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\Test-VoiceNotification.ps1 -NoSpeak"
+  ],
+  "tests": [
+    {
+      "name": "voice notification smoke test",
+      "status": "passed"
+    }
+  ],
+  "next_action": "Review the styled spoken output and adjust style profiles."
+}

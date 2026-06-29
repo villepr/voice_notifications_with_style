@@ -1,0 +1,9 @@
+output/
+
+config/secrets.local.json
+config/*.secret.json
+config/*.secret
+.env
+.env.*
+*.log
+*.tmp

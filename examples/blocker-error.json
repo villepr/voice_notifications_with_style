@@ -1,0 +1,10 @@
+{
+  "type": "turn.blocked",
+  "title": "Blocked by missing metadata",
+  "message": "Windows media sessions did not expose a Spotify title, and the Spotify window title was blank. The notifier used the neutral style and logged the fallback path.",
+  "status": "blocked",
+  "errors": [
+    "No usable now-playing metadata was available."
+  ],
+  "next_action": "Start Spotify playback, then rerun the test script."
+}

@@ -1,0 +1,10 @@
+{
+  "type": "approval.required",
+  "title": "Permission needed",
+  "message": "Codex needs permission to update the global Codex notify configuration after the standalone PoC is validated.",
+  "status": "needs_approval",
+  "commands": [
+    "powershell -NoProfile -ExecutionPolicy Bypass -File C:\\path\\to\\voice_notifications_with_style\\scripts\\Invoke-CodexNotifyVoice.ps1"
+  ],
+  "next_action": "Approve the config update only after the local test sounds useful."
+}
