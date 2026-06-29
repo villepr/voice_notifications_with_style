@@ -162,6 +162,29 @@ notify = [ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", "-N
 To roll back, remove the `notify` entry or restore your previous Codex config
 backup.
 
+## Desktop Session Watcher
+
+Some Codex Desktop completion bubbles may not call the configured `notify`
+command in already-running sessions. As a fallback, this PoC includes a session
+watcher that follows Codex user-session JSONL files and speaks when a user-owned
+turn completes. It ignores subagent session files and waits briefly to avoid
+double-speaking if the native `notify` hook has already started.
+
+Start it in the background:
+
+```powershell
+Start-Process -WindowStyle Hidden -FilePath "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "C:\path\to\voice_notifications_with_style\scripts\Start-CodexSessionVoiceWatcher.ps1")
+```
+
+Stop it:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Stop-CodexSessionVoiceWatcher.ps1
+```
+
+The watcher writes `output\codex-session-watcher.log` and
+`output\codex-session-watcher.pid`.
+
 ## API Keys
 
 Preferred: use user environment variables, not the project config file. The PoC

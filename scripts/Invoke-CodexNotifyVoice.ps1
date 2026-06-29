@@ -28,6 +28,8 @@ function Write-HookLog {
 $tempPayloadPath = $null
 
 try {
+    Write-HookLog "Voice notify started."
+
     $stdinText = ""
     if ([Console]::IsInputRedirected) {
         $stdinText = [Console]::In.ReadToEnd()
