@@ -7,7 +7,9 @@ param(
     [ValidateSet("local", "elevenlabs", "openai")]
     [string]$TtsProvider,
     [int]$MaxRuntimeSeconds = 180,
-    [int]$StaleLockSeconds = 300
+    [int]$StaleLockSeconds = 300,
+    [int]$LockWaitSeconds = 30,
+    [int]$LockRetryDelayMs = 500
 )
 
 $ErrorActionPreference = "Stop"
@@ -16,12 +18,16 @@ $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $projectRoot = Split-Path -Parent $scriptRoot
 $invokeScript = Join-Path $scriptRoot "Invoke-VoiceNotification.ps1"
 $outputRoot = Join-Path $projectRoot "output"
+$pendingRoot = Join-Path $outputRoot "pending"
 $hookLogPath = Join-Path $outputRoot "codex-notify-hook.log"
 $lockPath = Join-Path $outputRoot "codex-notify-worker.lock"
 
 function Ensure-OutputRoot {
     if (-not (Test-Path -LiteralPath $outputRoot)) {
         New-Item -ItemType Directory -Path $outputRoot -Force | Out-Null
+    }
+    if (-not (Test-Path -LiteralPath $pendingRoot)) {
+        New-Item -ItemType Directory -Path $pendingRoot -Force | Out-Null
     }
 }
 
@@ -70,6 +76,11 @@ function New-WorkerLock {
 }
 
 function Invoke-NotifierChild {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$QueuedPayloadFile
+    )
+
     $psi = New-Object System.Diagnostics.ProcessStartInfo
     $psi.FileName = "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe"
     $speakArg = if ($NoSpeak.IsPresent) { "-NoSpeak" } else { "-Speak" }
@@ -80,7 +91,7 @@ function Invoke-NotifierChild {
     if (-not [string]::IsNullOrWhiteSpace($TtsProvider)) {
         $extraArgs += " -TtsProvider $TtsProvider"
     }
-    $psi.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$invokeScript`" -PayloadFile `"$PayloadFile`" $speakArg$extraArgs"
+    $psi.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$invokeScript`" -PayloadFile `"$QueuedPayloadFile`" $speakArg$extraArgs"
     $psi.UseShellExecute = $false
     $psi.CreateNoWindow = $true
 
@@ -99,29 +110,84 @@ function Invoke-NotifierChild {
     return $process.ExitCode
 }
 
+function Wait-WorkerLock {
+    $deadline = (Get-Date).AddSeconds($LockWaitSeconds)
+
+    do {
+        $stream = New-WorkerLock
+        if ($null -ne $stream) {
+            return $stream
+        }
+
+        Start-Sleep -Milliseconds $LockRetryDelayMs
+    } while ((Get-Date) -lt $deadline)
+
+    return $null
+}
+
+function Get-PendingPayloadFiles {
+    Ensure-OutputRoot
+    @(Get-ChildItem -LiteralPath $pendingRoot -Filter "codex-notify-*.json" -File -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTimeUtc, Name)
+}
+
+function Invoke-QueuedPayload {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$QueuedPayloadFile
+    )
+
+    if (-not (Test-Path -LiteralPath $QueuedPayloadFile)) {
+        Write-WorkerLog "Voice notify worker skipped queued payload: file not found '$QueuedPayloadFile'."
+        return
+    }
+
+    try {
+        $exitCode = Invoke-NotifierChild -QueuedPayloadFile $QueuedPayloadFile
+        Write-WorkerLog "Voice notify worker completed. childExitCode=$exitCode payload='$QueuedPayloadFile'."
+    } catch {
+        Write-WorkerLog "Voice notify worker failed queued payload '$QueuedPayloadFile': $($_.Exception.Message)"
+    } finally {
+        if (Test-Path -LiteralPath $QueuedPayloadFile) {
+            Remove-Item -LiteralPath $QueuedPayloadFile -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+function Invoke-PendingQueueDrain {
+    $processedCount = 0
+
+    while ($true) {
+        $pendingFiles = @(Get-PendingPayloadFiles)
+        if ($pendingFiles.Count -eq 0) {
+            Write-WorkerLog "Voice notify queue drain completed. processed=$processedCount."
+            return
+        }
+
+        foreach ($pendingFile in $pendingFiles) {
+            Invoke-QueuedPayload -QueuedPayloadFile $pendingFile.FullName
+            $processedCount++
+        }
+    }
+}
+
 $lockStream = $null
 
 try {
     Write-WorkerLog "Voice notify worker starting. payload='$PayloadFile'."
-
-    if (-not (Test-Path -LiteralPath $PayloadFile)) {
-        Write-WorkerLog "Voice notify worker skipped: payload file not found."
-        exit 0
-    }
 
     if (-not (Test-Path -LiteralPath $invokeScript)) {
         Write-WorkerLog "Voice notify worker skipped: Invoke-VoiceNotification.ps1 missing at '$invokeScript'."
         exit 0
     }
 
-    $lockStream = New-WorkerLock
+    $lockStream = Wait-WorkerLock
     if ($null -eq $lockStream) {
-        Write-WorkerLog "Voice notify worker skipped: another worker is active. Dropping payload '$PayloadFile'."
+        Write-WorkerLog "Voice notify worker skipped: another worker is active. Payload left queued '$PayloadFile'."
         exit 0
     }
 
-    $exitCode = Invoke-NotifierChild
-    Write-WorkerLog "Voice notify worker completed. childExitCode=$exitCode payload='$PayloadFile'."
+    Invoke-PendingQueueDrain
     exit 0
 } catch {
     Write-WorkerLog "Voice notify worker failed: $($_.Exception.Message)"
@@ -130,8 +196,5 @@ try {
     if ($null -ne $lockStream) {
         $lockStream.Dispose()
         Remove-Item -LiteralPath $lockPath -Force -ErrorAction SilentlyContinue
-    }
-    if (Test-Path -LiteralPath $PayloadFile) {
-        Remove-Item -LiteralPath $PayloadFile -Force -ErrorAction SilentlyContinue
     }
 }
