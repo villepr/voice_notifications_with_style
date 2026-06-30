@@ -49,6 +49,14 @@ function Get-JsonProperty {
         return ""
     }
 
+    if ($Object -is [System.Collections.IDictionary] -and $Object.Contains($Name)) {
+        if ($null -eq $Object[$Name]) {
+            return ""
+        }
+
+        return [string]$Object[$Name]
+    }
+
     $property = $Object.PSObject.Properties[$Name]
     if ($null -eq $property -or $null -eq $property.Value) {
         return ""
@@ -165,6 +173,108 @@ function ConvertTo-NotificationPayload {
     return (New-ManualPayload -Message $text)
 }
 
+function Test-JsonPropertyHasMeaningfulValue {
+    param(
+        $Object,
+        [string]$Name
+    )
+
+    if ($null -eq $Object) {
+        return $false
+    }
+
+    if ($Object -is [System.Collections.IDictionary] -and $Object.Contains($Name)) {
+        if ($null -eq $Object[$Name]) {
+            return $false
+        }
+
+        if ($Object[$Name] -is [string]) {
+            return (-not [string]::IsNullOrWhiteSpace($Object[$Name]))
+        }
+
+        return $true
+    }
+
+    $property = $Object.PSObject.Properties[$Name]
+    if ($null -eq $property -or $null -eq $property.Value) {
+        return $false
+    }
+
+    if ($property.Value -is [string]) {
+        return (-not [string]::IsNullOrWhiteSpace($property.Value))
+    }
+
+    return $true
+}
+
+function Test-TitleOnlyJsonText {
+    param([string]$Text)
+
+    if ([string]::IsNullOrWhiteSpace($Text)) {
+        return $false
+    }
+
+    try {
+        $json = $Text.Trim() | ConvertFrom-Json -ErrorAction Stop
+        if ($null -eq $json -or -not (Test-JsonPropertyHasMeaningfulValue -Object $json -Name "title")) {
+            return $false
+        }
+
+        foreach ($meaningfulName in @("message", "summary", "text", "result", "last-assistant-message")) {
+            if (Test-JsonPropertyHasMeaningfulValue -Object $json -Name $meaningfulName) {
+                return $false
+            }
+        }
+
+        return $true
+    } catch {
+        return $false
+    }
+}
+
+function Test-VSCodePromptAcknowledgement {
+    param(
+        $Payload,
+        [string]$RawText
+    )
+
+    $payloadRawType = ""
+    $payloadClient = ""
+    if ($null -ne $Payload -and $null -ne $Payload.source) {
+        $payloadRawType = Get-JsonProperty -Object $Payload.source -Name "rawType"
+        $payloadClient = Get-JsonProperty -Object $Payload.source -Name "client"
+    }
+
+    if ($payloadRawType -eq "agent-turn-complete" -and $payloadClient -eq "VS Code") {
+        $payloadMessage = Get-JsonProperty -Object $Payload -Name "message"
+        if ([string]::IsNullOrWhiteSpace($payloadMessage) -or (Test-TitleOnlyJsonText -Text $payloadMessage)) {
+            return $true
+        }
+    }
+
+    if ([string]::IsNullOrWhiteSpace($RawText)) {
+        return $false
+    }
+
+    $text = $RawText.Trim()
+    $text = $text -replace '^\s*Codex notification:\s*', ''
+    try {
+        $rawJson = $text | ConvertFrom-Json -ErrorAction Stop
+        $rawType = Get-JsonProperty -Object $rawJson -Name "type"
+        $rawClient = Get-JsonProperty -Object $rawJson -Name "client"
+        if ($rawType -ne "agent-turn-complete" -or $rawClient -ne "VS Code") {
+            return $false
+        }
+
+        $lastAssistantMessage = Get-JsonProperty -Object $rawJson -Name "last-assistant-message"
+        return ([string]::IsNullOrWhiteSpace($lastAssistantMessage) -or (Test-TitleOnlyJsonText -Text $lastAssistantMessage))
+    } catch {
+        return ($text -match '"type"\s*:\s*"agent-turn-complete"' -and
+            $text -match '"client"\s*:\s*"VS Code"' -and
+            $text -match '"last-assistant-message"\s*:\s*null')
+    }
+}
+
 function Write-PendingPayload {
     param($Payload)
 
@@ -190,6 +300,11 @@ try {
     }
 
     $payload = ConvertTo-NotificationPayload -RawText $rawText -InputSource $inputSource
+    if (Test-VSCodePromptAcknowledgement -Payload $payload -RawText $rawText) {
+        Write-HookLog "Voice notify skipped: VS Code prompt acknowledgement."
+        exit 0
+    }
+
     $payloadPath = Write-PendingPayload -Payload $payload
 
     if (-not (Test-Path -LiteralPath $workerScript)) {
