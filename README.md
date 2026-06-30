@@ -128,38 +128,21 @@ https://platform.openai.com/docs/pricing
 
 Typical notification rewrite usage is roughly 800-1,800 input tokens and
 100-250 output tokens, so the text rewrite is usually about `$0.0003-$0.0007`
-per notification, or about `$0.03-$0.07` per 100 notifications.
+per notification.
 
 For `gpt-4o-mini-tts`, the same pricing page lists text input at `$0.60` per
 1M tokens and audio output at `$12` per 1M audio tokens. The speech request is
 therefore the main cost driver, and depends on the final spoken length. For the
 short notifications this project generates, expect fractions of a cent to a few
-cents per spoken notification, not dollars. At 100 notifications, that should
-usually be well under a few dollars unless you make the spoken updates much
-longer. Treat this as a budget estimate, not a billing guarantee. Check the live
-OpenAI pricing page and your OpenAI usage dashboard for exact rates and usage.
+cents per spoken notification, not dollars. 
 
 To avoid speech cost while testing prompt behavior, run with `-NoSpeak`. To
 avoid cloud API calls entirely for text tests, add `-StylingProvider templates`
 as well.
 
-## Local Voice Lab
-
-Local neural voice generation is being scoped separately under:
-
-```text
-experiments\local_voice_lab
-```
-
-That lab benchmarks Kokoro ONNX first, with Piper and KittenTTS as comparison
-paths. It uses ignored local model/audio/output folders and does not change the
-active OpenAI TTS default or the Codex notify hook.
-
 ## Current Limitations
 
 - The OpenAI API path is the only tested cloud path.
-- Local neural TTS is not active in the main notifier yet; it is isolated in
-  `experiments\local_voice_lab` until quality and latency are proven.
 - Spotify is optional, but Windows media metadata can be unreliable. If no
   useful metadata is available, the notifier should still speak with neutral
   styling.
