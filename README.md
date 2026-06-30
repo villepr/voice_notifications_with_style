@@ -21,6 +21,63 @@ The styled output acts like a DJ or MC when music is playing, and like an MC
 when no music is detected. It summarizes technical paths and commands instead
 of reading raw script names or shell commands aloud.
 
+## Install
+
+Requirements:
+
+- Windows 10 or 11.
+- PowerShell 5.1 or newer.
+- Codex Desktop, if you want always-on Codex completion notifications.
+- Spotify Desktop or any app that publishes Windows media-session metadata, if
+  you want music-aware styling.
+- An OpenAI API key for the default OpenAI text rewrite and OpenAI TTS path.
+
+Clone the repository:
+
+```powershell
+git clone https://github.com/villepr/voice_notifications_with_style.git
+cd voice_notifications_with_style
+```
+
+Add an API key. Preferred: use a user environment variable:
+
+```powershell
+setx OPENAI_API_KEY "your-key-here"
+```
+
+Open a new terminal after `setx`. For a local-only test checkout, you can also
+create an ignored plaintext file:
+
+```text
+config\openaiapikey.secret
+```
+
+with just the key as the file contents.
+
+Run a text-only smoke test:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Test-VoiceNotification.ps1 -NoSpeak
+```
+
+Run a spoken test:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Test-VoiceNotification.ps1 -Speak
+```
+
+Enable always-on Codex notifications by adding this `notify` entry to your
+Codex config file, normally `%USERPROFILE%\.codex\config.toml`, with the path
+adjusted to your checkout:
+
+```toml
+notify = [ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "C:\\path\\to\\voice_notifications_with_style\\scripts\\Invoke-CodexNotifyVoice.ps1" ]
+```
+
+The always-on hook is detached: Codex queues the voice notification worker and
+returns immediately, so slow API calls or audio playback should not block the
+Codex app.
+
 ## Quick Start
 
 From this folder:
@@ -116,24 +173,38 @@ The always-on Codex hook writes its own small status log to
 
 ## Configuration
 
-The PoC uses one main config file:
+The user-facing config is intentionally small:
 
 ```text
 config\voice-notifier.config.json
 ```
 
-The most common tuning points are:
+It is layered over internal defaults in:
 
-- `defaults.text.provider` and `defaults.text.model` for the default rewrite
-  provider/model.
-- `defaults.speech.provider` for the default speech provider.
-- `providers.openai.text`, `providers.gemini.text`, `providers.openai.speech`,
-  `providers.elevenlabs.speech`, and `providers.windowsSpeech` for provider
-  endpoints, models, timeouts, voices, and output settings.
-- `prompts.styling.systemLines` for the default LLM rewrite prompt.
-- `providers.openai.speech.saveAudioByDefault` and
-  `providers.elevenlabs.speech.saveAudioByDefault` if you want cloud speech
-  files kept without passing `-SaveAudio`.
+```text
+src\VoiceNotifier.defaults.json
+```
+
+Most users should only edit:
+
+- `defaults.text.provider` and `defaults.text.model`
+- `defaults.speech.provider`
+- `prompts.styling.maxWords`
+- `providers.openai.speech.voice`
+- `tts.audioDucking.enabled` and `tts.audioDucking.duckVolume`
+- `trace.enabled`
+
+The main styling prompt is plain text:
+
+```text
+config\styling-system-prompt.txt
+```
+
+Provider endpoints, retry policy, built-in fallback style profiles, keyword
+maps, and technical translation defaults are internal implementation defaults.
+They can still be overridden by adding the same nested keys to
+`config\voice-notifier.config.json`, but they are not meant to be routine user
+settings.
 
 Prompt lines support `{{maxWords}}` and `{{voiceChoices}}` placeholders. The
 JSON response schema is kept in code because it is API validation behavior, not
@@ -147,11 +218,17 @@ To enable the notifier for Codex, point the global Codex `notify` command at:
 scripts\Invoke-CodexNotifyVoice.ps1
 ```
 
-That wrapper reads notification JSON from stdin when Codex provides it, falls
-back to a short turn-ended message when it does not, and then calls
-`Invoke-VoiceNotification.ps1 -Speak`. Failures are written to
-`output\codex-notify-hook.log` and swallowed so notification problems do not
-break Codex turns.
+That wrapper reads notification JSON from stdin or command-line args, normalizes
+Codex `agent-turn-complete` payloads down to the final assistant message, drops
+raw input-message history, writes a small queued payload under `output\pending`,
+starts `Invoke-CodexNotifyWorker.ps1` in a hidden detached process, and exits
+immediately. The worker then calls `Invoke-VoiceNotification.ps1 -Speak` outside
+the Codex notify call. It uses a one-at-a-time lock and a runtime timeout so a
+slow API call, playback issue, or overlapping notification cannot block the main
+Codex process.
+
+Failures are written to `output\codex-notify-hook.log` and swallowed so
+notification problems do not break Codex turns.
 
 Example `notify` entry, with the path adjusted to your checkout:
 
@@ -174,6 +251,19 @@ Start it in the background:
 
 ```powershell
 Start-Process -WindowStyle Hidden -FilePath "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "C:\path\to\voice_notifications_with_style\scripts\Start-CodexSessionVoiceWatcher.ps1")
+```
+
+Start it at every user logon with Windows Task Scheduler:
+
+```powershell
+$taskName = "Voice Notifications With Style Watcher"
+$taskPath = "\Codex\"
+$script = "C:\path\to\voice_notifications_with_style\scripts\Start-CodexSessionVoiceWatcher.ps1"
+$action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-WindowStyle Hidden -NoProfile -ExecutionPolicy Bypass -File `"$script`" -StylingProvider openai -TtsProvider openai"
+$trigger = New-ScheduledTaskTrigger -AtLogOn -User "$env:USERDOMAIN\$env:USERNAME"
+$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -MultipleInstances IgnoreNew -ExecutionTimeLimit ([TimeSpan]::Zero)
+$principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType Interactive -RunLevel Limited
+Register-ScheduledTask -TaskName $taskName -TaskPath $taskPath -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Description "Starts the Codex styled voice notification session watcher at user logon." -Force
 ```
 
 Stop it:
@@ -233,16 +323,59 @@ Plaintext one-key files are also supported and ignored:
 - `config\openaiapikey.secret`
 
 OpenAI styling uses the same `OPENAI_API_KEY` / `config\openaiapikey.secret`
-source as OpenAI TTS. If your account uses a different API base, edit
-`providers.openai.text.endpoint` in `config\voice-notifier.config.json`.
+source as OpenAI TTS. If your account uses a different API base, add
+`providers.openai.text.endpoint` to `config\voice-notifier.config.json` to
+override the internal default.
+
+## Expected API Cost
+
+The default setup makes two paid OpenAI API calls per spoken notification:
+
+1. A small text rewrite with `gpt-5.4-nano`.
+2. A text-to-speech request with `gpt-4o-mini-tts`.
+
+As of June 30, 2026, OpenAI lists `gpt-5.4-nano` standard pricing at `$0.20`
+per 1M input tokens and `$1.25` per 1M output tokens on the API pricing page:
+https://platform.openai.com/docs/pricing
+
+Typical notification rewrite usage is roughly 800-1,800 input tokens and
+100-250 output tokens, so the text rewrite is usually about `$0.0003-$0.0007`
+per notification, or about `$0.03-$0.07` per 100 notifications.
+
+For `gpt-4o-mini-tts`, the same pricing page lists text input at `$0.60` per
+1M tokens and audio output at `$12` per 1M audio tokens. The speech request is
+therefore the main cost driver, and depends on the final spoken length. For the
+short notifications this project generates, expect fractions of a cent to a few
+cents per spoken notification, not dollars. At 100 notifications, that should
+usually be well under a few dollars unless you make the spoken updates much
+longer. Treat this as a budget estimate, not a billing guarantee. Check the live
+OpenAI pricing page and your OpenAI usage dashboard for exact rates and usage.
+
+To avoid speech cost while testing prompt behavior, run with `-NoSpeak`. To
+avoid cloud API calls entirely for text tests, add `-StylingProvider templates`
+as well.
 
 ## License
 
 MIT. See `LICENSE`.
 
+## Local Voice Lab
+
+Local neural voice generation is being scoped separately under:
+
+```text
+experiments\local_voice_lab
+```
+
+That lab benchmarks Kokoro ONNX first, with Piper and KittenTTS as comparison
+paths. It uses ignored local model/audio/output folders and does not change the
+active OpenAI TTS default, the Codex notify hook, or the desktop session watcher.
+
 ## Current Limitations
 
-- Local-only: no Spotify OAuth or local neural TTS yet.
+- Local neural TTS is not active in the main notifier yet; it is isolated in
+  `experiments\local_voice_lab` until quality and latency are proven.
+- Local-only: no Spotify OAuth yet.
 - Gemini styling is best-effort; free-tier rate limits or transient `503`
   responses can fall back to deterministic templates.
 - Windows media session metadata can occasionally expose promotional Spotify

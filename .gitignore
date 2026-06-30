@@ -1,4 +1,7 @@
 output/
+experiments/
+__pycache__/
+*.pyc
 
 config/secrets.local.json
 config/*.secret.json

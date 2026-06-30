@@ -1,18 +1,151 @@
 Set-StrictMode -Version Latest
 
+function ConvertTo-ConfigHashtable {
+    param($Value)
+
+    if ($null -eq $Value) {
+        return $null
+    }
+
+    if ($Value -is [System.Management.Automation.PSCustomObject]) {
+        $result = [ordered]@{}
+        foreach ($property in $Value.PSObject.Properties) {
+            $result[$property.Name] = ConvertTo-ConfigHashtable -Value $property.Value
+        }
+        return $result
+    }
+
+    if ($Value -is [System.Collections.IDictionary]) {
+        $result = [ordered]@{}
+        foreach ($key in $Value.Keys) {
+            $result[[string]$key] = ConvertTo-ConfigHashtable -Value $Value[$key]
+        }
+        return $result
+    }
+
+    if ($Value -is [System.Collections.IEnumerable] -and $Value -isnot [string]) {
+        $items = @()
+        foreach ($item in $Value) {
+            $items += (ConvertTo-ConfigHashtable -Value $item)
+        }
+        return $items
+    }
+
+    return $Value
+}
+
+function Read-ConfigJsonFile {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path
+    )
+
+    $raw = Get-Content -Raw -LiteralPath $Path
+    return ConvertTo-ConfigHashtable -Value ($raw | ConvertFrom-Json)
+}
+
+function Merge-ConfigHashtable {
+    param(
+        [System.Collections.IDictionary]$Base,
+        [System.Collections.IDictionary]$Override
+    )
+
+    $result = [ordered]@{}
+    foreach ($key in $Base.Keys) {
+        $result[[string]$key] = $Base[$key]
+    }
+
+    foreach ($key in $Override.Keys) {
+        $keyText = [string]$key
+        if ($result.Contains($keyText) -and
+            $result[$keyText] -is [System.Collections.IDictionary] -and
+            $Override[$key] -is [System.Collections.IDictionary]) {
+            $result[$keyText] = Merge-ConfigHashtable -Base $result[$keyText] -Override $Override[$key]
+        } else {
+            $result[$keyText] = $Override[$key]
+        }
+    }
+
+    return $result
+}
+
+function Resolve-ConfigPath {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ProjectRoot,
+        [string]$Path
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Path)) {
+        return ""
+    }
+
+    if ([System.IO.Path]::IsPathRooted($Path)) {
+        return $Path
+    }
+
+    return Join-Path $ProjectRoot $Path
+}
+
+function Apply-PromptFileOverrides {
+    param(
+        [Parameter(Mandatory = $true)]
+        [System.Collections.IDictionary]$Config,
+        [Parameter(Mandatory = $true)]
+        [string]$ProjectRoot
+    )
+
+    if (-not $Config.Contains("promptFiles")) {
+        return $Config
+    }
+
+    $promptFiles = $Config["promptFiles"]
+    if ($null -eq $promptFiles -or -not ($promptFiles -is [System.Collections.IDictionary]) -or -not $promptFiles.Contains("stylingSystem")) {
+        return $Config
+    }
+
+    $promptPath = Resolve-ConfigPath -ProjectRoot $ProjectRoot -Path ([string]$promptFiles["stylingSystem"])
+    if ([string]::IsNullOrWhiteSpace($promptPath) -or -not (Test-Path -LiteralPath $promptPath)) {
+        return $Config
+    }
+
+    $promptText = (Get-Content -Raw -LiteralPath $promptPath).Trim()
+    if ([string]::IsNullOrWhiteSpace($promptText)) {
+        return $Config
+    }
+
+    if (-not $Config.Contains("prompts") -or $null -eq $Config["prompts"] -or -not ($Config["prompts"] -is [System.Collections.IDictionary])) {
+        $Config["prompts"] = [ordered]@{}
+    }
+    if (-not $Config["prompts"].Contains("styling") -or $null -eq $Config["prompts"]["styling"] -or -not ($Config["prompts"]["styling"] -is [System.Collections.IDictionary])) {
+        $Config["prompts"]["styling"] = [ordered]@{}
+    }
+
+    $Config["prompts"]["styling"]["systemLines"] = @($promptText)
+    return $Config
+}
+
 function Get-VoiceNotifierConfig {
     param(
         [Parameter(Mandatory = $true)]
         [string]$ProjectRoot
     )
 
+    $defaultsPath = Join-Path $ProjectRoot "src\VoiceNotifier.defaults.json"
     $configPath = Join-Path $ProjectRoot "config\voice-notifier.config.json"
+    if (-not (Test-Path -LiteralPath $defaultsPath)) {
+        throw "Defaults file not found: $defaultsPath"
+    }
     if (-not (Test-Path -LiteralPath $configPath)) {
         throw "Config file not found: $configPath"
     }
 
-    $raw = Get-Content -Raw -LiteralPath $configPath
-    return $raw | ConvertFrom-Json
+    $defaults = Read-ConfigJsonFile -Path $defaultsPath
+    $overrides = Read-ConfigJsonFile -Path $configPath
+    $merged = Merge-ConfigHashtable -Base $defaults -Override $overrides
+    $merged = Apply-PromptFileOverrides -Config $merged -ProjectRoot $ProjectRoot
+
+    return ($merged | ConvertTo-Json -Depth 64 | ConvertFrom-Json)
 }
 
 function Get-VoiceNotifierSecret {

@@ -1,0 +1,277 @@
+{
+  "defaults": {
+    "text": {
+      "provider": "openai",
+      "model": "gpt-5.4-nano"
+    },
+    "speech": {
+      "provider": "openai"
+    }
+  },
+  "trace": {
+    "enabled": true,
+    "path": "output/voice-notifier.trace.jsonl"
+  },
+  "media": {
+    "preferSpotify": true,
+    "useWindowsMediaSessions": true,
+    "useSpotifyWindowTitleFallback": true
+  },
+  "providers": {
+    "openai": {
+      "text": {
+        "enabled": true,
+        "model": "gpt-5.4-nano",
+        "endpoint": "https://us.api.openai.com/v1/responses",
+        "apiKeyEnvironmentVariable": "OPENAI_API_KEY",
+        "timeoutSeconds": 20,
+        "maxOutputTokens": 420,
+        "retryAttempts": 1,
+        "retryDelayMs": 1200
+      },
+      "speech": {
+        "enabled": true,
+        "model": "gpt-4o-mini-tts",
+        "endpoint": "https://api.openai.com/v1/audio/speech",
+        "apiKeyEnvironmentVariable": "OPENAI_API_KEY",
+        "voice": "alloy",
+        "voiceChoices": [
+          "alloy",
+          "ash",
+          "ballad",
+          "coral",
+          "echo",
+          "fable",
+          "nova",
+          "onyx",
+          "sage",
+          "shimmer",
+          "verse",
+          "marin",
+          "cedar"
+        ],
+        "responseFormat": "mp3",
+        "speed": 1.0,
+        "outputDirectory": "output/audio",
+        "saveAudioByDefault": false
+      }
+    },
+    "gemini": {
+      "text": {
+        "enabled": true,
+        "model": "gemini-3.5-flash",
+        "endpoint": "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+        "apiKeyEnvironmentVariables": [
+          "GOOGLE_API_KEY",
+          "GEMINI_API_KEY"
+        ],
+        "timeoutSeconds": 20,
+        "maxWords": 90,
+        "temperature": 0.9,
+        "retryAttempts": 1,
+        "retryDelayMs": 2500
+      }
+    },
+    "elevenlabs": {
+      "speech": {
+        "enabled": true,
+        "modelId": "eleven_multilingual_v2",
+        "endpoint": "https://api.elevenlabs.io/v1/text-to-speech/{voice_id}",
+        "voicesEndpoint": "https://api.elevenlabs.io/v1/voices",
+        "apiKeyEnvironmentVariable": "ELEVENLABS_API_KEY",
+        "voiceId": "",
+        "outputFormat": "mp3_44100_128",
+        "outputDirectory": "output/audio",
+        "saveAudioByDefault": false,
+        "voiceSettings": {
+          "stability": 0.45,
+          "similarity_boost": 0.75,
+          "style": 0.35,
+          "use_speaker_boost": true
+        }
+      }
+    },
+    "windowsSpeech": {
+      "preferredVoices": [
+        "Microsoft Hazel Desktop",
+        "Microsoft Zira Desktop"
+      ],
+      "voice": "",
+      "rate": 0,
+      "volume": 100
+    }
+  },
+  "prompts": {
+    "styling": {
+      "maxWords": 90,
+      "systemLines": [
+        "You turn coding-assistant notifications into short spoken DJ or MC announcements.",
+        "Use the current music metadata to infer style, tempo, mood, narrator energy, vocabulary, and rhythm. Make it sound like a DJ or MC speaking over that music. If no music is available, use a neutral MC style.",
+        "Keep the main meaning and language of the notification. Skip file paths, shell commands, and long technical strings; summarize them naturally.",
+        "Do not translate the announcement verbatim into the language of the song, artist, title, album, or music metadata. You can add translated expressions for flavor.",
+        "Be concise: one or two spoken sentences, max {{maxWords}} words.",
+        "Make a strong, plausible call on dynamism. Do not default to neutral energy unless the track clearly calls for it. Decide whether the delivery should feel restrained, driving, breathy, clipped, warm, tense, dramatic, intimate, or high-voltage.",
+        "Set voice.speed deliberately between 0.85 and 1.20: slower for spacious, heavy, smoky, or dramatic tracks; faster for bright, driving, dance, punk, or high-energy tracks.",
+        "Voice instructions must be concrete and performable: describe vocal energy, pacing, intensity, pauses, emotional temperature, delivery archetype, and how hard the speaker should push the words.",
+        "Choose voice.voice from this OpenAI-compatible list only: {{voiceChoices}}. Pick the closest timbre; do not invent voice names.",
+        "Return JSON only: { \"text\": \"spoken announcement\", \"voice\": { \"instructions\": \"voice direction for TTS\", \"voice\": \"voice name from the allowed list\", \"speed\": 1.0, \"energy\": \"low|medium|high\", \"pace\": \"slow|medium|fast\", \"response_format\": \"mp3\" } }"
+      ]
+    }
+  },
+  "styling": {
+    "templates": {
+      "enabled": true
+    }
+  },
+  "tts": {
+    "audioDucking": {
+      "enabled": true,
+      "targetProcessName": "Spotify",
+      "duckVolume": 0.5,
+      "restoreDelayMs": 150
+    }
+  },
+  "styleProfiles": {
+    "neutral": {
+      "description": "direct, calm, concise",
+      "instructions": "Act as the MC if there is no music, or a DJ/MC if music is playing. Direct, calm, plain-language delivery. Summarize technical paths and commands instead of reading them.",
+      "rate": 0,
+      "volume": 100
+    },
+    "reggae": {
+      "description": "warm, relaxed, rhythmic, slightly more spacious",
+      "instructions": "Act as a warm DJ/MC riding the groove. Relaxed, rhythmic phrasing, sunny and grounded. Summarize technical paths and commands instead of reading them.",
+      "rate": -1,
+      "volume": 100
+    },
+    "cinematic": {
+      "description": "composed, dramatic, clear",
+      "instructions": "Act as a cinematic DJ/MC setting the scene. Clear pacing, a little drama, and strong scene-setting. Summarize technical paths and commands instead of reading them.",
+      "rate": -1,
+      "volume": 100
+    },
+    "electronic": {
+      "description": "clipped, energetic, precise",
+      "instructions": "Act as a clean club DJ/MC. Energetic, precise, short pulses, crisp transitions, no filler. Summarize technical paths and commands instead of reading them.",
+      "rate": 1,
+      "volume": 100
+    },
+    "rock": {
+      "description": "punchier, more direct",
+      "instructions": "Act as a stage MC with a rock-show edge. Punchy, confident, direct, with strong verbs and forward motion. Summarize technical paths and commands instead of reading them.",
+      "rate": 1,
+      "volume": 100
+    },
+    "jazz": {
+      "description": "smooth, conversational, lightly syncopated",
+      "instructions": "Act as a smooth jazz-club MC. Conversational, lightly syncopated, and specific without reading raw technical strings.",
+      "rate": 0,
+      "volume": 100
+    },
+    "country": {
+      "description": "friendly, line-dance caller energy, plainspoken",
+      "instructions": "Act as a friendly country dance-hall MC. Plainspoken, upbeat, a little line-dance caller energy. Summarize technical paths and commands instead of reading them.",
+      "rate": 0,
+      "volume": 100
+    }
+  },
+  "keywordOverrides": [
+    {
+      "style": "reggae",
+      "keywords": [
+        "reggae",
+        "dub",
+        "ska",
+        "bob marley",
+        "peter tosh",
+        "bunny wailer",
+        "toots and the maytals"
+      ]
+    },
+    {
+      "style": "cinematic",
+      "keywords": [
+        "soundtrack",
+        "score",
+        "orchestra",
+        "orchestral",
+        "philharmonic",
+        "film",
+        "theme",
+        "ludwig goransson",
+        "ludwig göransson",
+        "john williams",
+        "hans zimmer",
+        "joseph shirley",
+        "mandalorian",
+        "live and let die",
+        "diamonds are forever"
+      ]
+    },
+    {
+      "style": "electronic",
+      "keywords": [
+        "electronic",
+        "techno",
+        "house",
+        "ambient",
+        "synth",
+        "daft punk",
+        "aphex twin",
+        "four tet"
+      ]
+    },
+    {
+      "style": "rock",
+      "keywords": [
+        "rock",
+        "metal",
+        "punk",
+        "nirvana",
+        "foo fighters",
+        "led zeppelin",
+        "black sabbath"
+      ]
+    },
+    {
+      "style": "jazz",
+      "keywords": [
+        "jazz",
+        "swing",
+        "bebop",
+        "miles davis",
+        "john coltrane",
+        "bill evans",
+        "ella fitzgerald"
+      ]
+    },
+    {
+      "style": "country",
+      "keywords": [
+        "country",
+        "line dance",
+        "line dancing",
+        "honky tonk",
+        "bluegrass",
+        "dolly parton",
+        "johnny cash",
+        "willie nelson",
+        "shania twain",
+        "garth brooks"
+      ]
+    }
+  ],
+  "technicalTranslations": {
+    "CI": "automated checks",
+    "lint": "code-style checks",
+    "linter": "code-style checker",
+    "sandbox approval": "permission to run a command",
+    "approval": "permission",
+    "diff": "the changes Codex made",
+    "PR": "pull request",
+    "repo": "project folder",
+    "stdout": "command output",
+    "stderr": "error output",
+    "smoke test": "quick verification test"
+  }
+}
